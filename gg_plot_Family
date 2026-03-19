@@ -1,0 +1,114 @@
+library(tidyverse)
+library(RColorBrewer)
+library(paletteer)
+library(extrafont)
+
+# Load the data
+full_bracken_data <- read.delim("D:/Bioinformatics/new_family_combined_bracken.tsv", stringsAsFactors = FALSE)
+
+# Select only the fraction columns
+frac_cols <- grep("bracken_frac$", names(full_bracken_data), value = TRUE)
+
+# Reshape to long format
+long_data <- full_bracken_data %>%
+     select(name, all_of(frac_cols)) %>%
+     pivot_longer(cols = -name, names_to = "Sample", values_to = "Fraction")
+
+# Identify top 10 taxa by total abundance
+top_taxa <- long_data %>%
+     group_by(name) %>%
+     summarise(total_fraction = sum(Fraction)) %>%
+     top_n(10, total_fraction) %>%
+     pull(name)
+ 
+ # Replace non-top taxa with "Other Families"
+ long_data_grouped <- long_data %>%
+    mutate(name = if_else(name %in% top_taxa, name, "Other Families")) %>%
+    group_by(Sample, name) %>%
+     summarise(Fraction = sum(Fraction), .groups = "drop")
+ 
+ 
+ # Reorder factor levels so "Other Families" is first (bottom of stack)
+ long_data_grouped$name <- factor(long_data_grouped$name,
+                                  levels = c(setdiff(unique(long_data_grouped$name), "Other Families"), "Other Families"))
+ 
+ long_data_grouped <- long_data_grouped %>%
+     mutate(Sample = recode(Sample,
+                            "ctrl1_0_boutput.bracken_frac" = "Ctrl 1 (wk0)",
+                            "ctrl1_3_boutput.bracken_frac" = "Ctrl 1 (wk3)",
+                            "ctrl2_0_boutput.bracken_frac" = "Ctrl 2 (wk0)",
+                            "ctrl2_3_boutput.bracken_frac" = "Ctrl 2 (wk3)",
+                            "ctrl3_0_boutput.bracken_frac" = "Ctrl 3 (wk0)",
+                            "ctrl3_3_boutput.bracken_frac" = "Ctrl 3 (wk3)",
+                            "ctrl4_0_boutput.bracken_frac" = "Ctrl 4 (wk0)",
+                            "ctrl4_3_boutput.bracken_frac" = "Ctrl 4 (wk3)",
+                            "oa1_0_boutput.bracken_frac" = "OA 1 (wk0)",
+                            "oa1_3_boutput.bracken_frac" = "OA 1 (wk3)",
+                            "oa2_0_boutput.bracken_frac" = "OA 2 (wk0)",
+                            "oa2_3_boutput.bracken_frac" = "OA 2 (wk3)",
+                            "oa3_0_boutput.bracken_frac" = "OA 3 (wk0)",
+                            "oa3_3_boutput.bracken_frac" = "OA 3 (wk3)",
+                            "oa4_0_boutput.bracken_frac" = "OA 4 (wk0)",
+                            "oa4_3_boutput.bracken_frac" = "OA 4 (wk3)",
+                            "oa_ura1_0_boutput.bracken_frac" = "OA + Ura 1 (wk0)",
+                            "oa_ura1_3_boutput.bracken_frac" = "OA + Ura 1 (wk3)",
+                            "oa_ura2_0_boutput.bracken_frac" = "OA + Ura 2 (wk0)",
+                            "oa_ura2_3_boutput.bracken_frac"= "OA + Ura 2 (wk3)",
+                            "oa_ura3_0_boutput.bracken_frac"= "OA + Ura 3 (wk0)",
+                            "oa_ura3_3_boutput.bracken_frac"= "OA + Ura 3 (wk3)",
+                            "oa_ura4_0_boutput.bracken_frac"= "OA + Ura 4 (wk0)",
+                            "oa_ura4_3_boutput.bracken_frac"= "OA + Ura 4 (wk3)",
+                            "ura1_0_boutput.bracken_frac" = "Ura 1 (wk0)",
+                            "ura1_3_boutput.bracken_frac" = "Ura 1 (wk3)",
+                            "ura2_0_boutput.bracken_frac" = "Ura 2 (wk0)",
+                            "ura2_3_boutput.bracken_frac" = "Ura 2 (wk3)",
+                            "ura3_0_boutput.bracken_frac" = "Ura 3 (wk0)",
+                            "ura3_3_boutput.bracken_frac" = "Ura 3 (wk3)",
+                            "ura4_0_boutput.bracken_frac" = "Ura 4 (wk0)",
+                            "ura4_3_boutput.bracken_frac" = "Ura 4 (wk3)",
+                            # Add more mappings as needed
+     ))
+ 
+ library(stringr)
+ library(forcats)
+ library(dplyr)
+ 
+ # Re-derive Group robustly (ignore case, allow flexible spacing like "OA+Ura")
+ long_data_grouped <- long_data_grouped %>%
+     mutate(
+         Group = case_when(
+             str_detect(Sample, regex("^Ctrl", ignore_case = TRUE))              ~ "ctrl",
+             str_detect(Sample, regex("^Ura",  ignore_case = TRUE))              ~ "ura",
+             str_detect(Sample, regex("^OA\\s*\\+\\s*Ura", ignore_case = TRUE))  ~ "oa + ura",
+             str_detect(Sample, regex("^OA",   ignore_case = TRUE))              ~ "oa",
+             TRUE ~ "other"
+         )
+     )
+ 
+ # Option A: relevel **only** using levels that are present (no warning)
+ desired <- c("ctrl", "ura", "oa", "oa + ura", "other")
+ present <- intersect(desired, unique(long_data_grouped$Group))
+ long_data_grouped <- long_data_grouped %>%
+     mutate(Group = factor(Group, levels = present))   # ordered as in `present`
+ 
+ 
+ 
+ # Build the final ordered levels:
+ sample_levels <- long_data_grouped %>%
+     distinct(Group, Sample) %>%
+     arrange(Group, Sample) %>%
+     pull(Sample)
+ 
+ long_data_grouped <- long_data_grouped %>%
+     mutate(Sample = factor(Sample, levels = sample_levels))
+ 
+ # Plot
+ ggplot(long_data_grouped, aes(x = Sample, y = Fraction, fill = name)) +
+     geom_bar(stat = "identity") +
+     labs(title = "Top 10 Families by Relative Abundance",
+          x = "Sample",
+          y = "Relative Abundance",
+          fill = "Family") +
+     theme_classic() +
+     scale_fill_paletteer_d("colorBlindness::ModifiedSpectralScheme11Steps") +
+     theme(axis.text.x = element_text(angle = 45, hjust = 1))
